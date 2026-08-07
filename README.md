@@ -18,3 +18,9 @@ $$
 This distribution is generally intractable.
 We instead construct a Collapsed Gibbs Sampler that iteratively updates $\theta$ and $Y_{U}$.  
 
+## Simulation-Based Calibration (SBC) 
+
+We use Simulation-Based Calibration (SBC) to assess the quality of the CGS sampler.
+The results are shown in the next figure. 
+
+![SBC histograms](examples/sbc_histograms.png)
