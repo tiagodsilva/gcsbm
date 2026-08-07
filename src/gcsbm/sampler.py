@@ -88,47 +88,59 @@ def resample_theta(
     # we use a Dirichlet and beta priors for the former, and a Gaussian for the latter
 
     # A posterior distribution over labels
-    label_prior = theta_prior.label_concentration
-    label_count = jnp.zeros_like(label_prior).at[labels].add(1)
-    label_posterior = label_count + label_prior
+    def sample_label_con(key: jax.Array):
+        label_prior = theta_prior.label_concentration
+        label_count = jnp.zeros_like(label_prior).at[labels].add(1)
+        label_posterior = label_count + label_prior
+        return label_count, jax.random.dirichlet(key, label_posterior)
 
-    label_dist = jax.random.dirichlet(kl, label_posterior)
+    label_count, label_dist = sample_label_con(kl)
 
     # A posterior distribution over intra- and inter-label connectivity
-    conn_prior = theta_prior.conn_concentration
-    label_i, label_j = jnp.meshgrid(labels, labels)
-    conn_count = jnp.zeros_like(conn_prior).at[label_i, label_j, 0].add(adj)
-    conn_count = conn_count.at[label_i, label_j, 1].add(1 - adj)
+    def sample_conn_con(key: jax.Array):
+        conn_prior = theta_prior.conn_concentration
+        label_i, label_j = jnp.meshgrid(labels, labels)
+        conn_count = (
+            jnp.zeros_like(conn_prior).at[label_i, label_j, 0].add(adj)
+        )
+        conn_count = conn_count.at[label_i, label_j, 1].add(1 - adj)
 
-    # Divide by 2 since every edge is counted twice
-    conn_posterior = conn_count / 2 + conn_prior
-    i, j = jnp.triu_indices(len(conn_posterior))
-    conn_samples = jax.random.beta(
-        kc, conn_posterior[i, j, 0], conn_posterior[i, j, 1]
-    )
-    conn_dist = theta.conn_dist.at[i, j].set(conn_samples)
-    conn_dist = conn_dist.at[j, i].set(conn_samples)
+        # Divide by 2 since every edge is counted twice
+        conn_posterior = conn_count / 2 + conn_prior
+        i, j = jnp.triu_indices(len(conn_posterior))
+        conn_samples = jax.random.beta(
+            key, conn_posterior[i, j, 0], conn_posterior[i, j, 1]
+        )
+        conn_dist = theta.conn_dist.at[i, j].set(conn_samples)
+        return conn_dist.at[j, i].set(conn_samples)
+
+    conn_dist = sample_conn_con(kc)
 
     # A posterior distribution over label-wise features
-    features_posterior_mean = jnp.zeros_like(theta_prior.mu_mean)
-    features_posterior_mean = features_posterior_mean.at[labels].add(features)
-    features_posterior_mean = features_posterior_mean / label_count
+    def sample_features_mean(key: jax.Array):
+        features_posterior_mean = jnp.zeros_like(theta_prior.mu_mean)
+        features_posterior_mean = features_posterior_mean.at[labels].add(
+            features
+        )
+        features_posterior_mean = features_posterior_mean / label_count
 
-    sigma_sq = theta.sigma**2
-    sigma_prior_sq = theta_prior.sigma_mean**2
+        sigma_sq = theta.sigma**2
+        sigma_prior_sq = theta_prior.sigma_mean**2
 
-    features_posterior_mean = (
-        label_count[:, None] * sigma_prior_sq * features_posterior_mean
-        + sigma_sq * theta_prior.mu_mean
-    ) / (label_count[:, None] * sigma_prior_sq + sigma_sq)
-    features_posterior_std = jnp.sqrt(
-        (sigma_sq * sigma_prior_sq)
-        / (label_count[:, None] * sigma_prior_sq + sigma_sq)
-    )
+        features_posterior_mean = (
+            label_count[:, None] * sigma_prior_sq * features_posterior_mean
+            + sigma_sq * theta_prior.mu_mean
+        ) / (label_count[:, None] * sigma_prior_sq + sigma_sq)
+        features_posterior_std = jnp.sqrt(
+            (sigma_sq * sigma_prior_sq)
+            / (label_count[:, None] * sigma_prior_sq + sigma_sq)
+        )
 
-    mu_dist = features_posterior_mean + features_posterior_std[
-        :, None
-    ] * jax.random.normal(kf, shape=features_posterior_mean.shape)
+        return features_posterior_mean + features_posterior_std[
+            :, None
+        ] * jax.random.normal(key, shape=features_posterior_mean.shape)
+
+    mu_dist = sample_features_mean(kf)
 
     return theta.relace(
         label_dist=label_dist, conn_dist=conn_dist, mu_dist=mu_dist
@@ -136,7 +148,7 @@ def resample_theta(
 
 
 def step(
-    carry: tuple[jax.Array, jax.Array, jax.Array],
+    carry: tuple[jax.Array, jax.Array, CSBMParam],
     _,
     adj: jax.Array,
     features: jax.Array,
@@ -147,13 +159,13 @@ def step(
     nk, kl, kt = jax.random.split(key, 3)
 
     # We first update labels
-    labels = resample_labels(kl, labels, theta, adj, features)
+    nlabels = resample_labels(kl, labels, theta, adj, features)
 
     # We then update theta
     ntheta = resample_theta(kt, labels, theta, adj, features, theta_prior)
 
     # Return carry and scanned output
-    return (nk, labels, ntheta), (labels, ntheta)
+    return (nk, nlabels, ntheta), (nlabels, ntheta)
 
 
 def sample(
