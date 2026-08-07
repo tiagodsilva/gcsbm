@@ -21,6 +21,7 @@ We instead construct a Collapsed Gibbs Sampler that iteratively updates $\theta$
 ## Simulation-Based Calibration (SBC) 
 
 We use Simulation-Based Calibration (SBC) to assess the quality of the CGS sampler.
-The results are shown in the next figure. 
+We compute the rank statistics for the label probabilities, intra- and inter-community connection strengths, and label-conditioned feature averages. 
+The results are shown in the next figure, suggesting the sampler's correctness (having near-uniformly distributed rank statistics). 
 
 ![SBC histograms](examples/sbc_histograms.png)

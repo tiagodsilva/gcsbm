@@ -164,8 +164,8 @@ def main():
     axes[2].axhline(1.0 / num_samples, color="r", linestyle="--")
 
     plt.tight_layout()
-    plt.savefig("sbc_histograms.png")
-    print("SBC histograms saved to sbc_histograms.png")
+    plt.savefig("examples/sbc_histograms.png")
+    print("SBC histograms saved to examples/sbc_histograms.png")
 
 
 if __name__ == "__main__":
