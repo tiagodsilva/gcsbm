@@ -28,12 +28,13 @@ def resample_labels(
         score: jax.Array,
         old_label: jax.Array,
         new_label: jax.Array,
+        current_labels: jax.Array,
     ):
         # We do this incrementally to avoid repeated redundant computations
         label_log_prob = jnp.log(theta.label_dist)
 
-        conn_prob_new = theta.conn_dist[new_label, labels]
-        conn_prob_old = theta.conn_dist[old_label, labels]
+        conn_prob_new = theta.conn_dist[new_label, current_labels]
+        conn_prob_old = theta.conn_dist[old_label, current_labels]
 
         edge_log_prob_new = jnp.log(
             adj[node] * conn_prob_new + (1 - adj[node]) * (1 - conn_prob_new)
@@ -60,16 +61,22 @@ def resample_labels(
         return score + score_shift
 
     def update_label(
-        carry: tuple[jax.Array, jax.Array, jax.Array],
-        xs: tuple[jax.Array, jax.Array],
+        carry: tuple[jax.Array, jax.Array, jax.Array, jax.Array],
+        missing: jax.Array,
     ):
-        key, node, score = carry
-        label, missing = xs
+        key, node, score, current_labels = carry
+        label = current_labels[node]
 
         # Compute scores for each new label
         def resample():
-            scores = jax.vmap(update_score, in_axes=(None, None, None, 0))(
-                node, score, label, jnp.arange(len(theta.label_dist))
+            scores = jax.vmap(
+                update_score, in_axes=(None, None, None, 0, None)
+            )(
+                node,
+                score,
+                label,
+                jnp.arange(len(theta.label_dist)),
+                current_labels,
             )
             logits = jax.nn.log_softmax(scores)
 
@@ -82,12 +89,15 @@ def resample_labels(
         new_label, key, score = jax.lax.cond(
             missing, resample, lambda: (label, key, score)
         )
+        current_labels = current_labels.at[node].set(new_label)
 
-        return (key, node + 1, score), new_label
+        return (key, node + 1, score, current_labels), None
 
     # We iteratively re-sample labels and update the scores accordingly
-    _, labels = jax.lax.scan(
-        update_label, init=(key, jnp.array(0), score), xs=(labels, is_missing)
+    (_, _, _, labels), _ = jax.lax.scan(
+        update_label,
+        init=(key, jnp.array(0, dtype=jnp.int32), score, labels),
+        xs=is_missing,
     )
     return labels
 
@@ -124,13 +134,16 @@ def resample_theta(
         # Mask out diagonal since the graph has no self loops
         mask = 1.0 - jnp.eye(len(adj))
 
-        conn_count = (
-            jnp.zeros_like(conn_prior).at[label_i, label_j, 0].add(adj * mask)
-        )
+        conn_count = jnp.zeros_like(conn_prior)
+        conn_count = conn_count.at[label_i, label_j, 0].add(adj * mask)
         conn_count = conn_count.at[label_i, label_j, 1].add((1 - adj) * mask)
 
-        # Divide by 2 since every edge is counted twice
-        conn_posterior = conn_count / 2.0 + conn_prior
+        # Nodes (i, j) with label_i = label_j are counted twice.
+        K = len(conn_prior)
+        Ks = jnp.arange(K)
+        conn_count = conn_count.at[Ks, Ks].set(conn_count[Ks, Ks] / 2.0)
+
+        conn_posterior = conn_count + conn_prior
         return CSBMParamPrior.sample_conn(key, conn_posterior)
 
     conn_dist = sample_conn_con(kc)
