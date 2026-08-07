@@ -92,7 +92,7 @@ def resample_theta(
         label_prior = theta_prior.label_concentration
         label_count = jnp.zeros_like(label_prior).at[labels].add(1)
         label_posterior = label_count + label_prior
-        return label_count, jax.random.dirichlet(key, label_posterior)
+        return label_count, CSBMParamPrior.sample_label(key, label_posterior)
 
     label_count, label_dist = sample_label_con(kl)
 
@@ -107,12 +107,7 @@ def resample_theta(
 
         # Divide by 2 since every edge is counted twice
         conn_posterior = conn_count / 2 + conn_prior
-        i, j = jnp.triu_indices(len(conn_posterior))
-        conn_samples = jax.random.beta(
-            key, conn_posterior[i, j, 0], conn_posterior[i, j, 1]
-        )
-        conn_dist = theta.conn_dist.at[i, j].set(conn_samples)
-        return conn_dist.at[j, i].set(conn_samples)
+        return CSBMParamPrior.sample_conn(key, conn_posterior)
 
     conn_dist = sample_conn_con(kc)
 
@@ -136,9 +131,9 @@ def resample_theta(
             / (label_count[:, None] * sigma_prior_sq + sigma_sq)
         )
 
-        return features_posterior_mean + features_posterior_std[
-            :, None
-        ] * jax.random.normal(key, shape=features_posterior_mean.shape)
+        return CSBMParamPrior.sample_mu(
+            kf, features_posterior_mean, features_posterior_std
+        )
 
     mu_dist = sample_features_mean(kf)
 

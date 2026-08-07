@@ -24,6 +24,21 @@ class CSBMParamPrior:
     mu_mean: jax.Array  # Gaussian prior, (K, d)
     mu_sigma: jax.Array  # Gaussian prior, (K, 1)
 
+    @staticmethod
+    def sample_label(key: jax.Array, con: jax.Array):
+        return jax.random.dirichlet(key, con)
+
+    @staticmethod
+    def sample_conn(key: jax.Array, con: jax.Array):
+        i, j = jnp.triu_indices(len(con))
+        conn_samples = jax.random.beta(key, con[i, j, 0], con[i, j, 1])
+        conn_dist = con.at[i, j].set(conn_samples)
+        return conn_dist.at[j, i].set(conn_samples)
+
+    @staticmethod
+    def sample_mu(key: jax.Array, mean: jax.Array, std: jax.Array):
+        return mean + std[:, None] * jax.random.normal(key, shape=mean.shape)
+
 
 def ctx_log_prob(feature: jax.Array, label: jax.Array, theta: CSBMParam):
     return jsp.stats.norm.logpdf(feature, theta.mu_dist[label], theta.sigma)
@@ -59,3 +74,40 @@ def csbm_log_likelihood(
 
     # Compute the CSBM's log-likelihood
     return adj_log_prob + labels_log_prob + features_log_prob
+
+
+def simulate(
+    key: jax.Array, num_nodes: int, theta_prior: CSBMParamPrior, sigma: float
+):
+    nk, kl, kc, kf = jax.random.split(key, 4)
+    label_dist = CSBMParamPrior.sample_label(
+        kl, theta_prior.label_concentration
+    )
+    conn_dist = CSBMParamPrior.sample_conn(kc, theta_prior.conn_concentration)
+    mu_dist = CSBMParamPrior.sample_mu(
+        kf,
+        theta_prior.mu_mean,
+        theta_prior.mu_sigma * jnp.ones_like(label_dist),
+    )
+
+    # Sample labels from label dist, adjacency matrix from conn_dist,
+    # and features from mu_dist
+    nkm, nkl, nkc, nkf = jax.random.split(nk, 4)
+
+    # labels
+    labels = jax.random.categorical(
+        nkl, logits=jnp.log(label_dist), shape=(num_nodes,)
+    )
+
+    # adjacency matrix
+    i, j = jnp.triu_indices(num_nodes, k=1)
+    adj_flatten = jax.random.bernoulli(nkc, conn_dist[labels[i], labels[j]])
+    adj = jnp.zeros((num_nodes, num_nodes)).at[i, j].set(adj_flatten)
+    adj = adj.set[j, i].set(adj_flatten)
+
+    # features
+    features = CSBMParamPrior.sample_mu(
+        nkf, mu_dist[labels], jnp.ones_like(labels) * sigma
+    )
+
+    return adj, labels, features
