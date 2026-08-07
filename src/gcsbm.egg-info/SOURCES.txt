@@ -1,8 +1,0 @@
-README.md
-pyproject.toml
-src/gcsbm/sampler.py
-src/gcsbm.egg-info/PKG-INFO
-src/gcsbm.egg-info/SOURCES.txt
-src/gcsbm.egg-info/dependency_links.txt
-src/gcsbm.egg-info/requires.txt
-src/gcsbm.egg-info/top_level.txt
