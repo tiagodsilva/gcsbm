@@ -3,6 +3,8 @@ import jax
 import jax.numpy as jnp
 import jax.scipy as jsp
 
+NULL_LABEL = -1
+
 
 @struct.dataclass
 class CSBMParam:
@@ -13,6 +15,10 @@ class CSBMParam:
     # We assume features are drawn from a label-conditioned isotropic
     # Gaussian with average mu_dist[label] and variance sigma
     sigma: float
+
+
+def ctx_log_prob(feature: jax.Array, label: jax.Array, theta: CSBMParam):
+    return jsp.stats.norm.logpdf(feature, theta.mu_dist[label], theta.sigma)
 
 
 def csbm_log_likelihood(
@@ -39,12 +45,9 @@ def csbm_log_likelihood(
     labels_log_prob = jnp.log(theta.label_dist.at[labels]).sum()
 
     # Compute the log-likelihood of the features
-    features_log_prob = jsp.stats.multivariate_normal.logpdf(
-        features,
-        mean=theta.mu_dist[labels],
-        cov=theta.sigma * jnp.eye(num_nodes),
-    )
-    features_log_prob = jnp.sum(features_log_prob)
+    features_log_prob = jax.vmap(ctx_log_prob, in_axes=(0, 0, None))(
+        features, labels, theta
+    ).sum()
 
     # Compute the CSBM's log-likelihood
     return adj_log_prob + labels_log_prob + features_log_prob
