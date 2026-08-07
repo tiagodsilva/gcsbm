@@ -17,12 +17,22 @@ class CSBMParam:
     sigma: float
 
 
+@struct.dataclass
 class CSBMParamPrior:
     # We use conjugate priors for our model
     label_concentration: jax.Array  # Dirichlet prior, (K,)
     conn_concentration: jax.Array  # Beta prior, (K, K, 2)
     mu_mean: jax.Array  # Gaussian prior, (K, d)
     mu_sigma: jax.Array  # Gaussian prior, (K, 1)
+
+    @classmethod
+    def non_informative(cls, num_labels: int, num_features: int = 1):
+        return cls(
+            label_concentration=jnp.ones(num_labels),
+            conn_concentration=jnp.ones((num_labels, num_labels, 2)),
+            mu_mean=jnp.zeros((num_labels, num_features)),
+            mu_sigma=jnp.ones(num_labels),
+        )
 
     @staticmethod
     def sample_label(key: jax.Array, con: jax.Array):
@@ -31,8 +41,14 @@ class CSBMParamPrior:
     @staticmethod
     def sample_conn(key: jax.Array, con: jax.Array):
         i, j = jnp.triu_indices(len(con))
+        num_labels = len(con)
+
+        # Sample the connectivity matrix
         conn_samples = jax.random.beta(key, con[i, j, 0], con[i, j, 1])
-        conn_dist = con.at[i, j].set(conn_samples)
+
+        # Assign the sampled values to the connectivity matrix
+        conn_dist = jnp.zeros((num_labels, num_labels))
+        conn_dist = conn_dist.at[i, j].set(conn_samples)
         return conn_dist.at[j, i].set(conn_samples)
 
     @staticmethod
@@ -41,7 +57,7 @@ class CSBMParamPrior:
 
 
 def ctx_log_prob(feature: jax.Array, label: jax.Array, theta: CSBMParam):
-    return jsp.stats.norm.logpdf(feature, theta.mu_dist[label], theta.sigma)
+    return jsp.stats.norm.logpdf(feature, theta.mu_dist[label], theta.sigma).sum()
 
 
 def csbm_log_likelihood(
@@ -65,7 +81,7 @@ def csbm_log_likelihood(
     ).sum()
 
     # Compute the log-likelihood of the labels
-    labels_log_prob = jnp.log(theta.label_dist.at[labels]).sum()
+    labels_log_prob = jnp.log(theta.label_dist[labels]).sum()
 
     # Compute the log-likelihood of the features
     features_log_prob = jax.vmap(ctx_log_prob, in_axes=(0, 0, None))(
@@ -103,7 +119,7 @@ def simulate(
     i, j = jnp.triu_indices(num_nodes, k=1)
     adj_flatten = jax.random.bernoulli(nkc, conn_dist[labels[i], labels[j]])
     adj = jnp.zeros((num_nodes, num_nodes)).at[i, j].set(adj_flatten)
-    adj = adj.set[j, i].set(adj_flatten)
+    adj = adj.at[j, i].set(adj_flatten)
 
     # features
     features = CSBMParamPrior.sample_mu(

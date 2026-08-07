@@ -18,6 +18,7 @@ def resample_labels(
     theta: CSBMParam,
     adj: jax.Array,
     features: jax.Array,
+    is_missing: jax.Array,
 ):
     # Compute the initial score
     score = csbm_log_likelihood(adj, features, labels, theta)
@@ -30,13 +31,23 @@ def resample_labels(
     ):
         # We do this incrementally to avoid repeated redundant computations
         label_log_prob = jnp.log(theta.label_dist)
-        conn_log_prob = jnp.log(theta.conn_dist)
+
+        conn_prob_new = theta.conn_dist[new_label, labels]
+        conn_prob_old = theta.conn_dist[old_label, labels]
+
+        edge_log_prob_new = jnp.log(
+            adj[node] * conn_prob_new + (1 - adj[node]) * (1 - conn_prob_new)
+        )
+        edge_log_prob_old = jnp.log(
+            adj[node] * conn_prob_old + (1 - adj[node]) * (1 - conn_prob_old)
+        )
 
         # There are three components: label probabilities, edge probabilities, and feature probabilities
         score_shift = label_log_prob[new_label] - label_log_prob[old_label]
-        score_shift = score_shift + (
-            conn_log_prob[new_label, labels] - conn_log_prob[old_label, labels]
+        score_shift = (
+            score_shift + edge_log_prob_new.sum() - edge_log_prob_old.sum()
         )
+
         score_shift = (
             score_shift
             + ctx_log_prob(features[node], new_label, theta)
@@ -44,8 +55,12 @@ def resample_labels(
         )
         return score + score_shift
 
-    def update_label(carry: jax.Array, label: jax.Array):
+    def update_label(
+        carry: tuple[jax.Array, jax.Array, jax.Array],
+        xs: tuple[jax.Array, jax.Array],
+    ):
         key, node, score = carry
+        label, missing = xs
 
         # Compute scores for each new label
         def resample():
@@ -56,18 +71,19 @@ def resample_labels(
 
             newkey, subkey = jax.random.split(key, 2)
             new_label = jax.random.categorical(subkey, logits)
+            new_score = scores[new_label]
 
-            return new_label, newkey
+            return new_label, newkey, new_score
 
-        new_label, key = jax.lax.cond(
-            label == NULL_LABEL, resample, lambda: (label, key)
+        new_label, key, score = jax.lax.cond(
+            missing, resample, lambda: (label, key, score)
         )
 
         return (key, node + 1, score), new_label
 
     # We iteratively re-sample labels and update the scores accordingly
     _, labels = jax.lax.scan(
-        update_label, init=(key, jnp.array(0), score), length=len(features)
+        update_label, init=(key, jnp.array(0), score), xs=(labels, is_missing)
     )
     return labels
 
@@ -117,18 +133,23 @@ def resample_theta(
         features_posterior_mean = features_posterior_mean.at[labels].add(
             features
         )
-        features_posterior_mean = features_posterior_mean / label_count
+        features_posterior_mean = (
+            features_posterior_mean / label_count[:, None]
+        )
 
         sigma_sq = theta.sigma**2
-        sigma_prior_sq = theta_prior.sigma_mean**2
+        sigma_prior_sq = theta_prior.mu_sigma**2
 
         features_posterior_mean = (
-            label_count[:, None] * sigma_prior_sq * features_posterior_mean
+            label_count[:, None]
+            * sigma_prior_sq[:, None]
+            * features_posterior_mean
             + sigma_sq * theta_prior.mu_mean
-        ) / (label_count[:, None] * sigma_prior_sq + sigma_sq)
+        ) / (label_count[:, None] * sigma_prior_sq[:, None] + sigma_sq)
+
         features_posterior_std = jnp.sqrt(
             (sigma_sq * sigma_prior_sq)
-            / (label_count[:, None] * sigma_prior_sq + sigma_sq)
+            / (label_count * sigma_prior_sq + sigma_sq)
         )
 
         return CSBMParamPrior.sample_mu(
@@ -137,24 +158,26 @@ def resample_theta(
 
     mu_dist = sample_features_mean(kf)
 
-    return theta.relace(
+    return theta.replace(
         label_dist=label_dist, conn_dist=conn_dist, mu_dist=mu_dist
     )
 
 
+@jax.jit
 def step(
     carry: tuple[jax.Array, jax.Array, CSBMParam],
     _,
     adj: jax.Array,
     features: jax.Array,
     theta_prior: CSBMParamPrior,
+    is_missing: jax.Array,
 ):
     key, labels, theta = carry
 
     nk, kl, kt = jax.random.split(key, 3)
 
     # We first update labels
-    nlabels = resample_labels(kl, labels, theta, adj, features)
+    nlabels = resample_labels(kl, labels, theta, adj, features, is_missing)
 
     # We then update theta
     ntheta = resample_theta(kt, labels, theta, adj, features, theta_prior)
@@ -165,19 +188,50 @@ def step(
 
 def sample(
     labels: jax.Array,
-    theta: CSBMParam,
     adj: jax.Array,
     features: jax.Array,
     theta_prior: CSBMParamPrior,
+    sigma: float,
     steps: int = 100,
     seed: int = 42,
 ):
     key = jax.random.key(seed)
+    key, init_key, lk, ck, mk = jax.random.split(key, 5)
 
-    _, (labels, thetas) = jax.lax.scan(
-        f=partial(step, adj=adj, features=features, theta_prior=theta_prior),
+    is_missing = labels == NULL_LABEL
+    # Give random labels to unobserved nodes
+    random_labels = jax.random.randint(
+        init_key, labels.shape, 0, len(theta_prior.label_concentration)
+    )
+    labels = jnp.where(is_missing, random_labels, labels)
+
+    # Initialize theta
+    label_dist = CSBMParamPrior.sample_label(
+        lk, theta_prior.label_concentration
+    )
+    conn_dist = CSBMParamPrior.sample_conn(ck, theta_prior.conn_concentration)
+    mu_dist = CSBMParamPrior.sample_mu(
+        mk, theta_prior.mu_mean, theta_prior.mu_sigma
+    )
+
+    theta = CSBMParam(
+        label_dist=label_dist,
+        conn_dist=conn_dist,
+        mu_dist=mu_dist,
+        sigma=sigma,
+    )
+
+    # Sample from the posterior
+    _, (sampled_labels, thetas) = jax.lax.scan(
+        f=partial(
+            step,
+            adj=adj,
+            features=features,
+            theta_prior=theta_prior,
+            is_missing=is_missing,
+        ),
         init=(key, labels, theta),
         length=steps,
     )
 
-    return labels, thetas
+    return sampled_labels, thetas
