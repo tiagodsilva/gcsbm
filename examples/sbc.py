@@ -112,7 +112,7 @@ def run_sbc_trial(
 def main():
     print("Setting up SBC...")
     K = 2
-    d = 3
+    d = 4
     num_nodes = 25
     sigma = 1.0
     missing_rate = 0.3
@@ -125,27 +125,21 @@ def main():
     key = jax.random.key(42)
     keys = jax.random.split(key, num_trials)
 
-    ranks_label_dist = []
-    ranks_conn_dist = []
-    ranks_mu_dist = []
-
     print(f"Running {num_trials} SBC trials...")
 
-    for i in range(num_trials):
-        rl, rc, rm = run_sbc_trial(
-            keys[i],
-            num_nodes,
-            theta_prior,
-            sigma,
-            missing_rate,
-            steps,
-            burn_in,
-        )
-        ranks_label_dist.append(np.array(rl))
-        ranks_conn_dist.append(np.array(rc))
-        ranks_mu_dist.append(np.array(rm))
-        if (i + 1) % 100 == 0:
-            print(f"Completed {i + 1}/{num_trials} trials")
+    vmapped_run_sbc = jax.vmap(
+        run_sbc_trial, in_axes=(0, None, None, None, None, None, None)
+    )
+
+    ranks_label_dist, ranks_conn_dist, ranks_mu_dist = vmapped_run_sbc(
+        keys,
+        num_nodes,
+        theta_prior,
+        sigma,
+        missing_rate,
+        steps,
+        burn_in,
+    )
 
     ranks_label_dist = np.array(ranks_label_dist)
     ranks_conn_dist = np.array(ranks_conn_dist)

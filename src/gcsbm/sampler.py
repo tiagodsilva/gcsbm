@@ -150,21 +150,16 @@ def resample_theta(
 
     # A posterior distribution over label-wise features
     def sample_features_mean(key: jax.Array):
-        features_posterior_mean = jnp.zeros_like(theta_prior.mu_mean)
-        features_posterior_mean = features_posterior_mean.at[labels].add(
+        features_sum = jnp.zeros_like(theta_prior.mu_mean)
+        features_sum = features_sum.at[labels].add(
             features
-        )
-        features_posterior_mean = (
-            features_posterior_mean / label_count[:, None]
         )
 
         sigma_sq = theta.sigma**2
         sigma_prior_sq = theta_prior.mu_sigma**2
 
         features_posterior_mean = (
-            label_count[:, None]
-            * sigma_prior_sq[:, None]
-            * features_posterior_mean
+            sigma_prior_sq[:, None] * features_sum
             + sigma_sq * theta_prior.mu_mean
         ) / (label_count[:, None] * sigma_prior_sq[:, None] + sigma_sq)
 
