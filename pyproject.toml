@@ -15,3 +15,5 @@ build-backend = "setuptools.build_meta"
 [tool.pyright]
 reportArgumentType = false
  reportOperatorIssue = false
+ reportAttributeAccessIssue = false
+reportGeneralTypeIssues = false

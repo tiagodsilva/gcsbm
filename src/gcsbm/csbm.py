@@ -17,6 +17,14 @@ class CSBMParam:
     sigma: float
 
 
+class CSBMParamPrior:
+    # We use conjugate priors for our model
+    label_concentration: jax.Array  # Dirichlet prior, (K,)
+    conn_concentration: jax.Array  # Beta prior, (K, K, 2)
+    mu_mean: jax.Array  # Gaussian prior, (K, d)
+    mu_sigma: jax.Array  # Gaussian prior, (K, 1)
+
+
 def ctx_log_prob(feature: jax.Array, label: jax.Array, theta: CSBMParam):
     return jsp.stats.norm.logpdf(feature, theta.mu_dist[label], theta.sigma)
 
