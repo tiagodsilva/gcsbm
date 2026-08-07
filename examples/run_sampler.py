@@ -2,7 +2,7 @@ import jax
 import jax.numpy as jnp
 import matplotlib.pyplot as plt
 
-from gcsbm.csbm import CSBMParam, CSBMParamPrior, simulate
+from gcsbm.csbm import CSBMParamPrior, simulate
 from gcsbm.sampler import sample
 
 
@@ -30,7 +30,7 @@ def main():
     )
 
     print("Running sampler for 100 steps...")
-    sampled_labels, sampled_thetas = sample(
+    sampled_labels, _ = sample(
         labels=labels,
         adj=adj,
         features=features,
