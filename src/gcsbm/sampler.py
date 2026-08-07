@@ -42,6 +42,10 @@ def resample_labels(
             adj[node] * conn_prob_old + (1 - adj[node]) * (1 - conn_prob_old)
         )
 
+        # # Ignore self loop since the graph has no self loops
+        edge_log_prob_new = edge_log_prob_new.at[node].set(0.0)
+        edge_log_prob_old = edge_log_prob_old.at[node].set(0.0)
+
         # There are three components: label probabilities, edge probabilities, and feature probabilities
         score_shift = label_log_prob[new_label] - label_log_prob[old_label]
         score_shift = (
@@ -116,13 +120,17 @@ def resample_theta(
     def sample_conn_con(key: jax.Array):
         conn_prior = theta_prior.conn_concentration
         label_i, label_j = jnp.meshgrid(labels, labels)
+
+        # Mask out diagonal since the graph has no self loops
+        mask = 1.0 - jnp.eye(len(adj))
+
         conn_count = (
-            jnp.zeros_like(conn_prior).at[label_i, label_j, 0].add(adj)
+            jnp.zeros_like(conn_prior).at[label_i, label_j, 0].add(adj * mask)
         )
-        conn_count = conn_count.at[label_i, label_j, 1].add(1 - adj)
+        conn_count = conn_count.at[label_i, label_j, 1].add((1 - adj) * mask)
 
         # Divide by 2 since every edge is counted twice
-        conn_posterior = conn_count / 2 + conn_prior
+        conn_posterior = conn_count / 2.0 + conn_prior
         return CSBMParamPrior.sample_conn(key, conn_posterior)
 
     conn_dist = sample_conn_con(kc)

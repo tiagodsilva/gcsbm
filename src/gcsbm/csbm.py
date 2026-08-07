@@ -75,7 +75,7 @@ def csbm_log_likelihood(
 
     # Select only the upper triangular matrix
     i, j = jnp.triu_indices(num_nodes, k=1)
-    conn_upper = conn_matrix[j, j]
+    conn_upper = conn_matrix[i, j]
     adj_upper = adj[i, j]
 
     adj_log_prob = jnp.log(
@@ -95,7 +95,11 @@ def csbm_log_likelihood(
 
 
 def simulate(
-    key: jax.Array, num_nodes: int, theta_prior: CSBMParamPrior, sigma: float, missing_rate: float = 0.5
+    key: jax.Array,
+    num_nodes: int,
+    theta_prior: CSBMParamPrior,
+    sigma: float,
+    missing_rate: float = 0.5,
 ):
     nk, kl, kc, kf = jax.random.split(key, 4)
     label_dist = CSBMParamPrior.sample_label(
@@ -119,7 +123,9 @@ def simulate(
 
     # adjacency matrix
     i, j = jnp.triu_indices(num_nodes, k=1)
-    adj_flatten = jax.random.bernoulli(nkc, conn_dist[true_labels[i], true_labels[j]])
+    adj_flatten = jax.random.bernoulli(
+        nkc, conn_dist[true_labels[i], true_labels[j]]
+    )
     adj = jnp.zeros((num_nodes, num_nodes)).at[i, j].set(adj_flatten)
     adj = adj.at[j, i].set(adj_flatten)
 
@@ -129,7 +135,9 @@ def simulate(
     )
 
     # mask labels
-    missing_mask = jax.random.bernoulli(nkm, p=missing_rate, shape=(num_nodes,))
+    missing_mask = jax.random.bernoulli(
+        nkm, p=missing_rate, shape=(num_nodes,)
+    )
     labels = jnp.where(missing_mask, NULL_LABEL, true_labels)
 
     return adj, labels, features
