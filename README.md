@@ -12,7 +12,7 @@ We observe $(G, X, Y_{U} \cup Y_{L})$, with $Y_{L}$ representing the labelled no
 Our objective is to sample from the posterior over $Y_{U}, \theta$ given the above model, defined as 
 
 $$
-    q(\theta, Y_{U} | Y_{L}, G, X) \propto q(Y_{U}, Y_{L} | \theta) \cdot q(G | Y_{U}, Y_{L}, \theta) \cdot q(X | Y_{U}, Y_{L}, \theta). 
+    \pi(\theta, Y_{U} | Y_{L}, G, X) \propto q(Y_{U}, Y_{L} | \theta) \cdot q(G | Y_{U}, Y_{L}, \theta) \cdot q(X | Y_{U}, Y_{L}, \theta) \pi(\theta). 
 $$
 
 This distribution is generally intractable.
