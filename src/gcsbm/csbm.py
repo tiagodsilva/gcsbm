@@ -57,7 +57,9 @@ class CSBMParamPrior:
 
 
 def ctx_log_prob(feature: jax.Array, label: jax.Array, theta: CSBMParam):
-    return jsp.stats.norm.logpdf(feature, theta.mu_dist[label], theta.sigma).sum()
+    return jsp.stats.norm.logpdf(
+        feature, theta.mu_dist[label], theta.sigma
+    ).sum()
 
 
 def csbm_log_likelihood(
@@ -93,7 +95,7 @@ def csbm_log_likelihood(
 
 
 def simulate(
-    key: jax.Array, num_nodes: int, theta_prior: CSBMParamPrior, sigma: float
+    key: jax.Array, num_nodes: int, theta_prior: CSBMParamPrior, sigma: float, missing_rate: float = 0.5
 ):
     nk, kl, kc, kf = jax.random.split(key, 4)
     label_dist = CSBMParamPrior.sample_label(
@@ -110,20 +112,24 @@ def simulate(
     # and features from mu_dist
     nkm, nkl, nkc, nkf = jax.random.split(nk, 4)
 
-    # labels
-    labels = jax.random.categorical(
+    # true labels
+    true_labels = jax.random.categorical(
         nkl, logits=jnp.log(label_dist), shape=(num_nodes,)
     )
 
     # adjacency matrix
     i, j = jnp.triu_indices(num_nodes, k=1)
-    adj_flatten = jax.random.bernoulli(nkc, conn_dist[labels[i], labels[j]])
+    adj_flatten = jax.random.bernoulli(nkc, conn_dist[true_labels[i], true_labels[j]])
     adj = jnp.zeros((num_nodes, num_nodes)).at[i, j].set(adj_flatten)
     adj = adj.at[j, i].set(adj_flatten)
 
     # features
     features = CSBMParamPrior.sample_mu(
-        nkf, mu_dist[labels], jnp.ones_like(labels) * sigma
+        nkf, mu_dist[true_labels], jnp.ones_like(true_labels) * sigma
     )
+
+    # mask labels
+    missing_mask = jax.random.bernoulli(nkm, p=missing_rate, shape=(num_nodes,))
+    labels = jnp.where(missing_mask, NULL_LABEL, true_labels)
 
     return adj, labels, features

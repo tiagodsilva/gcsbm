@@ -1,7 +1,7 @@
 import jax
 import jax.numpy as jnp
 
-from gcsbm.csbm import NULL_LABEL, CSBMParam, CSBMParamPrior, simulate
+from gcsbm.csbm import CSBMParam, CSBMParamPrior, simulate
 from gcsbm.sampler import sample
 
 
@@ -17,20 +17,10 @@ def main():
     key = jax.random.key(42)
     key, sim_key = jax.random.split(key)
 
-    print("Simulating graph...")
-    adj, true_labels, features = simulate(
-        sim_key, num_nodes, theta_prior, sigma
-    )
+    print("Simulating graph with 30% missing data...")
+    adj, labels, features = simulate(sim_key, num_nodes, theta_prior, sigma, missing_rate=0.3)
 
-    # 30% missing data
-    print("Applying 30% missing data mask...")
-    key, mask_key = jax.random.split(key)
-    missing_mask = jax.random.bernoulli(mask_key, p=0.3, shape=(num_nodes,))
-
-    # Apply missing mask
-    labels = jnp.where(missing_mask, NULL_LABEL, true_labels)
-
-    missing_count = jnp.sum(labels == NULL_LABEL)
+    missing_count = jnp.sum(labels < 0)
     print(f"Total nodes: {num_nodes}")
     print(
         f"Missing labels: {missing_count} ({(missing_count / num_nodes) * 100:.1f}%)"
