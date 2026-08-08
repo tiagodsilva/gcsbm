@@ -200,6 +200,37 @@ def step(
     return (nk, nlabels, ntheta), (nlabels, ntheta)
 
 
+def initialize_theta(
+    key: jax.Array,
+    labels: jax.Array,
+    is_missing: jax.Array,
+    features: jax.Array,
+    theta_prior: CSBMParamPrior,
+):
+    kl, kc = jax.random.split(key, 2)
+
+    label_dist = CSBMParamPrior.sample_label(
+        kl, theta_prior.label_concentration
+    )
+    conn_dist = CSBMParamPrior.sample_conn(kc, theta_prior.conn_concentration)
+
+    mu_dist = (
+        jnp.zeros_like(theta_prior.mu_mean)
+        .at[labels]
+        .add(jnp.where(is_missing[:, None], 0, features))
+    )
+    label_count = (
+        jnp.zeros_like(theta_prior.label_concentration)
+        .at[labels]
+        .add(jnp.where(is_missing, 0, 1))
+    )
+    assert jnp.all(label_count > 0)
+
+    mu_dist = mu_dist / label_count[:, None]
+
+    return label_dist, conn_dist, mu_dist
+
+
 def sample(
     labels: jax.Array,
     adj: jax.Array,
@@ -211,22 +242,18 @@ def sample(
     burnin: int = 0,
 ) -> tuple[jax.Array, CSBMParam]:
     key = jax.random.key(seed)
-    key, init_key, lk, ck, mk = jax.random.split(key, 5)
+    key, kl, kt = jax.random.split(key, 3)
 
     is_missing = labels == NULL_LABEL
     # Give random labels to unobserved nodes
     random_labels = jax.random.randint(
-        init_key, labels.shape, 0, len(theta_prior.label_concentration)
+        kl, labels.shape, 0, len(theta_prior.label_concentration)
     )
     labels = jnp.where(is_missing, random_labels, labels)
 
     # Initialize theta
-    label_dist = CSBMParamPrior.sample_label(
-        lk, theta_prior.label_concentration
-    )
-    conn_dist = CSBMParamPrior.sample_conn(ck, theta_prior.conn_concentration)
-    mu_dist = CSBMParamPrior.sample_mu(
-        mk, theta_prior.mu_mean, theta_prior.mu_sigma
+    label_dist, conn_dist, mu_dist = initialize_theta(
+        kt, labels, is_missing, features, theta_prior
     )
 
     theta = CSBMParam(
