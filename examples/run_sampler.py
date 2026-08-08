@@ -1,3 +1,5 @@
+from functools import partial
+
 import jax
 import jax.numpy as jnp
 
@@ -33,11 +35,11 @@ def mse_theta(sampled_thetas: CSBMParam, true_theta: CSBMParam):
 def main():
     print("Setting up priors...")
     K = 2
-    d = 3
-    num_nodes = 200
-    sigma = 1.0
+    d = 10
+    num_nodes = 800
+    sigma = 3.0
     steps = 4000
-    missing_rate = 0.8
+    missing_rate = 0.95
 
     theta_prior = CSBMParamPrior.non_informative(num_labels=K, num_features=d)
 
@@ -65,9 +67,13 @@ def main():
     )
 
     # Compute the accuracy
+    @partial(jax.vmap, in_axes=(1,), out_axes=0)
+    def get_label(samples: jax.Array):
+        counts = jnp.zeros((K,)).at[samples].add(1) / len(samples)
+        return counts.argmax()
+
     accuracy = jnp.mean(
-        (sampled_labels[:, is_missing].mean(axis=0) > 0.5)
-        == true_labels[is_missing],
+        get_label(sampled_labels[:, is_missing]) == true_labels[is_missing],
     )
     print(f"Accuracy: {accuracy:.2f}")
 
