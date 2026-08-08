@@ -1,53 +1,81 @@
 import jax
 import jax.numpy as jnp
-import matplotlib.pyplot as plt
 
-from gcsbm.csbm import CSBMParamPrior, simulate
+from gcsbm.csbm import CSBMParam, CSBMParamPrior, simulate
 from gcsbm.sampler import sample
+
+
+def mse_theta(sampled_thetas: CSBMParam, true_theta: CSBMParam):
+    mse_label_dist = jnp.mean(
+        jnp.sum(
+            (sampled_thetas.label_dist - true_theta.label_dist[None]) ** 2,
+            axis=1,
+        ),
+        axis=0,
+    )
+    mse_mu_dist = jnp.mean(
+        jnp.sum(
+            (sampled_thetas.mu_dist - true_theta.mu_dist[None]) ** 2,
+            axis=(1, 2),
+        ),
+        axis=0,
+    )
+    mse_conn_dist = jnp.mean(
+        jnp.sum(
+            (sampled_thetas.conn_dist - true_theta.conn_dist[None]) ** 2,
+            axis=(1, 2),
+        ),
+        axis=0,
+    )
+    return mse_label_dist, mse_mu_dist, mse_conn_dist
 
 
 def main():
     print("Setting up priors...")
     K = 2
     d = 3
-    num_nodes = 100
+    num_nodes = 200
     sigma = 1.0
+    steps = 4000
+    missing_rate = 0.8
 
     theta_prior = CSBMParamPrior.non_informative(num_labels=K, num_features=d)
 
-    key = jax.random.key(42)
+    key = jax.random.key(21)
     key, sim_key = jax.random.split(key)
 
-    print("Simulating graph with 30% missing data...")
-    adj, labels, features = simulate(
-        sim_key, num_nodes, theta_prior, sigma, missing_rate=0.3
+    (adj, labels, features), (true_labels, true_theta, is_missing) = simulate(
+        sim_key, num_nodes, theta_prior, sigma, missing_rate=missing_rate
     )
 
-    missing_count = jnp.sum(labels < 0)
-    print(f"Total nodes: {num_nodes}")
     print(
-        f"Missing labels: {missing_count} ({(missing_count / num_nodes) * 100:.1f}%)"
+        f"Missing labels: {jnp.sum(is_missing)} ({(jnp.sum(is_missing) / num_nodes) * 100:.1f}%)"
     )
 
-    print("Running sampler for 100 steps...")
-    sampled_labels, _ = sample(
+    print("Running the model...")
+    sampled_labels, sampled_thetas = sample(
         labels=labels,
         adj=adj,
         features=features,
         theta_prior=theta_prior,
         sigma=sigma,
-        steps=100,
+        steps=steps,
         seed=42,
+        burnin=200,
     )
 
-    print("Sampling complete.")
-    print("Final sampled labels shape:", sampled_labels.shape)
+    # Compute the accuracy
+    accuracy = jnp.mean(
+        (sampled_labels[:, is_missing].mean(axis=0) > 0.5)
+        == true_labels[is_missing],
+    )
+    print(f"Accuracy: {accuracy:.2f}")
 
-    # Display per node probabilites of label = 1
-    counts = sampled_labels.sum(axis=0)
-    plt.figure(figsize=(10, 4))
-    plt.bar(range(num_nodes), counts)
-    plt.savefig("node_probabilities.png")
+    # Compute the MSE for theta
+    mse_label_dist, mse_mu_dist, mse_conn_dist = mse_theta(
+        sampled_thetas, true_theta
+    )
+    print(mse_label_dist, mse_mu_dist, mse_conn_dist)
 
 
 if __name__ == "__main__":

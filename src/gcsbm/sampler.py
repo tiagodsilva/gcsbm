@@ -151,9 +151,7 @@ def resample_theta(
     # A posterior distribution over label-wise features
     def sample_features_mean(key: jax.Array):
         features_sum = jnp.zeros_like(theta_prior.mu_mean)
-        features_sum = features_sum.at[labels].add(
-            features
-        )
+        features_sum = features_sum.at[labels].add(features)
 
         sigma_sq = theta.sigma**2
         sigma_prior_sq = theta_prior.mu_sigma**2
@@ -210,7 +208,8 @@ def sample(
     sigma: float,
     steps: int = 100,
     seed: int = 42,
-):
+    burnin: int = 0,
+) -> tuple[jax.Array, CSBMParam]:
     key = jax.random.key(seed)
     key, init_key, lk, ck, mk = jax.random.split(key, 5)
 
@@ -238,7 +237,7 @@ def sample(
     )
 
     # Sample from the posterior
-    _, (sampled_labels, thetas) = jax.lax.scan(
+    _, (sampled_labels, sampled_thetas) = jax.lax.scan(
         f=partial(
             step,
             adj=adj,
@@ -250,4 +249,7 @@ def sample(
         length=steps,
     )
 
-    return sampled_labels, thetas
+    sampled_labels = sampled_labels[burnin:]
+    sampled_thetas = jax.tree.map(lambda x: x[burnin:], sampled_thetas)
+
+    return sampled_labels, sampled_thetas

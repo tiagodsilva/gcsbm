@@ -120,6 +120,12 @@ def simulate(
     true_labels = jax.random.categorical(
         nkl, logits=jnp.log(label_dist), shape=(num_nodes,)
     )
+    true_theta = CSBMParam(
+        label_dist=label_dist,
+        conn_dist=conn_dist,
+        mu_dist=mu_dist,
+        sigma=sigma,
+    )
 
     # adjacency matrix
     i, j = jnp.triu_indices(num_nodes, k=1)
@@ -140,4 +146,4 @@ def simulate(
     )
     labels = jnp.where(missing_mask, NULL_LABEL, true_labels)
 
-    return adj, labels, features
+    return (adj, labels, features), (true_labels, true_theta, missing_mask)
